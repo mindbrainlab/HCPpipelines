@@ -36,6 +36,7 @@ fi
 SIEMENS_METHOD_OPT="SiemensFieldMap"
 SPIN_ECHO_METHOD_OPT="TOPUP"
 GENERAL_ELECTRIC_METHOD_OPT="GeneralElectricFieldMap"
+PHILIPS_METHOD_OPT="PhilipsFieldMap"
 FIELDMAP_METHOD_OPT="FIELDMAP"
 
 ################################################ SUPPORT FUNCTIONS ##################################################
@@ -80,6 +81,9 @@ Usage() {
   echo "                  readout distortion correction"
   echo "                ${SIEMENS_METHOD_OPT}"
   echo "                  use Siemens specific Gradient Echo Field Maps for readout"
+  echo "                  distortion correction"
+  echo "                ${PHILIPS_METHOD_OPT}"
+  echo "                  use Philips specific Gradient Echo Field Maps for readout"
   echo "                  distortion correction"
   echo ""
   echo "            [--topupconfig=<topup config file>]"
@@ -238,6 +242,28 @@ case $DistortionCorrection in
             --fmapmag=${MagnitudeInputName} \
             --fmapphase=${PhaseInputName} \
             --echodiff=${TE} \
+            --ofmapmag=${WD}/Magnitude \
+            --ofmapmagbrain=${WD}/Magnitude_brain \
+            --ofmap=${WD}/FieldMap \
+            --gdcoeffs=${GradientDistortionCoeffs}
+
+        ;;
+
+    ${PHILIPS_METHOD_OPT})
+
+        # --------------------------------------
+        # -- Philips Gradient Echo Field Maps --
+        # --------------------------------------
+
+        ### Create fieldmaps (and apply gradient non-linearity distortion correction)
+        echo " "
+        echo " "
+        echo " "
+
+        ${HCPPIPEDIR_Global}/PhilipsFieldMapPreprocessingAll.sh \
+            --workingdir=${WD}/FieldMap \
+            --fmapmag=${MagnitudeInputName} \
+            --fmapphase=${PhaseInputName} \
             --ofmapmag=${WD}/Magnitude \
             --ofmapmagbrain=${WD}/Magnitude_brain \
             --ofmap=${WD}/FieldMap \

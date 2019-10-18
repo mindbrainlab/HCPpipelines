@@ -11,6 +11,7 @@
 FIELDMAP_METHOD_OPT="FIELDMAP"
 SIEMENS_METHOD_OPT="SiemensFieldMap"
 GENERAL_ELECTRIC_METHOD_OPT="GeneralElectricFieldMap"
+PHILIPS_METHOD_OPT="PhilipsFieldMap"
 SPIN_ECHO_METHOD_OPT="TOPUP"
 
 ################################################ SUPPORT FUNCTIONS ##################################################
@@ -59,6 +60,10 @@ Usage() {
   echo "               \"${GENERAL_ELECTRIC_METHOD_OPT}\""
   echo "                 use General Electric specific Gradient Echo Field Maps"
   echo "                 for readout distortion correction"
+  echo ""
+  echo "               \"${PHILIPS_METHOD_OPT}\""
+  echo "                 use Philips specific Gradient Echo Field Maps for"
+  echo "                 readout distortion correction"
   echo ""
   echo "             [--topupconfig=<topup config file>]"
   echo "             --ojacobian=<output filename for Jacobian image (in T1w space)>"
@@ -264,6 +269,22 @@ case $DistortionCorrection in
 
             # process fieldmap with gradient non-linearity distortion correction
             ${GlobalScripts}/SiemensFieldMapPreprocessingAll.sh \
+                --workingdir=${WD}/FieldMap \
+                --fmapmag=${MagnitudeInputName} \
+                --fmapphase=${PhaseInputName} \
+                --echodiff=${deltaTE} \
+                --ofmapmag=${WD}/Magnitude \
+                --ofmapmagbrain=${WD}/Magnitude_brain \
+                --ofmap=${WD}/FieldMap \
+                --gdcoeffs=${GradientDistortionCoeffs}
+
+        elif [ $DistortionCorrection = "${PHILIPS_METHOD_OPT}" ] ; then
+            # --------------------------------------
+            # -- Philips Gradient Echo Field Maps --
+            # --------------------------------------
+
+            # process fieldmap with gradient non-linearity distortion correction
+            ${GlobalScripts}/PhilipsFieldMapPreprocessingAll.sh \
                 --workingdir=${WD}/FieldMap \
                 --fmapmag=${MagnitudeInputName} \
                 --fmapphase=${PhaseInputName} \

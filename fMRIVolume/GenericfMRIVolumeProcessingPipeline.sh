@@ -150,7 +150,7 @@ log_Msg "UnwarpDir: ${UnwarpDir}"
 FinalfMRIResolution=`opts_GetOpt1 "--fmrires" $@`  
 log_Msg "FinalfMRIResolution: ${FinalfMRIResolution}"
 
-# FIELDMAP, SiemensFieldMap, GeneralElectricFieldMap, or TOPUP
+# FIELDMAP, SiemensFieldMap, GeneralElectricFieldMap, PhilipsFieldMap or TOPUP
 # Note: FIELDMAP and SiemensFieldMap are equivalent
 DistortionCorrection=`opts_GetOpt1 "--dcmethod" $@`
 log_Msg "DistortionCorrection: ${DistortionCorrection}"

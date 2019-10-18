@@ -157,6 +157,7 @@ NONE_METHOD_OPT="NONE"
 FIELDMAP_METHOD_OPT="FIELDMAP"
 SIEMENS_METHOD_OPT="SiemensFieldMap"
 SPIN_ECHO_METHOD_OPT="TOPUP"
+PHILIPS_METHOD_OPT="PhilipsFieldMap"
 GENERAL_ELECTRIC_METHOD_OPT="GeneralElectricFieldMap"
 
 # ------------------------------------------------------------------------------
@@ -234,8 +235,8 @@ Usage: PreeFreeSurferPipeline.sh [options]
   --template2mmmask=<file path>       Brain mask MNI 2mm Template
   --brainsize=<size value>            Brain size estimate in mm, 150 for humans
   --fnirtconfig=<file path>           FNIRT 2mm T1w Configuration file
-  --fmapmag=<file path>               Siemens Gradient Echo Fieldmap magnitude file
-  --fmapphase=<file path>             Siemens Gradient Echo Fieldmap phase file
+  --fmapmag=<file path>               Siemens or Philips Gradient Echo Fieldmap magnitude file
+  --fmapphase=<file path>             Siemens or Philips Gradient Echo Fieldmap phase file
   --fmapgeneralelectric=<file path>   General Electric Gradient Echo Field Map file
                                       Two volumes in one file
                                       1. field map in deg
@@ -283,6 +284,10 @@ Usage: PreeFreeSurferPipeline.sh [options]
 
     "${SIEMENS_METHOD_OPT}"
        average any repeats and use Siemens specific Gradient Echo
+       Field Maps for readout distortion correction
+
+    "${PHILIPS_METHOD_OPT}"
+       average any repeats and use Philips specific Gradient Echo
        Field Maps for readout distortion correction
 
   --topupconfig=<file path>           Configuration file for topup or "NONE" if not used
@@ -632,7 +637,7 @@ if [ "$CustomBrain" = "NONE" ] ; then
 
   case $AvgrdcSTRING in
 
-    ${FIELDMAP_METHOD_OPT} | ${SPIN_ECHO_METHOD_OPT} | ${GENERAL_ELECTRIC_METHOD_OPT} | ${SIEMENS_METHOD_OPT})
+    ${FIELDMAP_METHOD_OPT} | ${SPIN_ECHO_METHOD_OPT} | ${GENERAL_ELECTRIC_METHOD_OPT} | ${SIEMENS_METHOD_OPT} | ${PHILIPS_METHOD_OPT})
 
       log_Msg "Performing ${AvgrdcSTRING} Readout Distortion Correction"
       wdir=${T2wFolder}/T2wToT1wDistortionCorrectAndReg
