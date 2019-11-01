@@ -274,17 +274,6 @@ BOLDMask=`opts_GetOpt1 "--boldmask" $@`                                  # Speci
                                                                          #   fMRI_FOV: a fMRI FOV mask
                                                                          #   NOTE: When using SEBASED bias field correction, the mask will default to T1_fMRI_FOV
                                                                          #   as the bias field is masked already.
-fMRIReference=`opts_GetOpt1 "--fmriref" $@`                              # Reference BOLD run name (i.e., --fmriname from run to be used as *reference*) to use as 
-                                                                         #   motion correction target and to copy atlas (MNI152) registration from (or NONE; default).
-                                                                         #   NOTE: The reference BOLD has to have been fully processed using fMRIVolume pipeline, so
-                                                                         #   that a distortion correction and atlas (MNI152) registration solution for the reference
-                                                                         #   BOLD already exists. Also, the reference BOLD must have been acquired using the same
-                                                                         #   phase encoding direction, or it can not serve as a valid reference. 
-fMRIReferenceReg=`opts_GetOpt1 "--fmrirefreg" $@`                        # In the cases when BOLD image is registered to a specified BOLD reference, this option 
-                                                                         #   specifies whether to use 'linear' or 'nonlinear' registration to reference BOLD.
-                                                                         #   Default is 'linear'.
-
-
 
 # Defaults
 PreregisterTool=`opts_DefaultOpt $PreregisterTool "epi_reg"`
@@ -310,7 +299,6 @@ DoSliceTimeCorrection=`opts_DefaultOpt $DoSliceTimeCorrection "FALSE"`   # WARNI
 
 # Defaults
 
-fMRIReference=`opts_DefaultOpt $fMRIReference "NONE"`
 BOLDMask=`opts_DefaultOpt $BOLDMask "T1_fMRI_FOV"`
 
 # ------------------------------------------------------------------------------
@@ -365,56 +353,6 @@ if [ "${BOLDMask}" != 'T1_fMRI_FOV' ]; then
     log_Err_Abort "--boldmask=${BOLDMask} is invalid! Valid options are: T1_fMRI_FOV (default), T1_DILATED_fMRI_FOV, T1_DILATED2x_fMRI_FOV, fMRI_FOV."
   fi
   ComplianceMsg+=" --boldmask=${BOLDMask}"
-  Compliance="LegacyStyleData"
-fi
-
-# -- Use of external BOLD reference
-
-if [ "$fMRIReference" = "NONE" ]; then
-  fMRIReferenceReg="NONE"    
-  fMRIReferencePath="NONE"
-  ReferenceResultsFolder="NONE"
-else
-  fMRIReferenceReg=`opts_DefaultOpt $fMRIReferenceReg "linear"`
-
-  # set reference and check if external reference (if one is specified) exists 
-
-  fMRIReferencePath="$Path"/"$Subject"/"$fMRIReference"
-  log_Msg "Using reference image from ${fMRIReferencePath}"
-  fMRIReferenceImage="$fMRIReferencePath"/"$ScoutName"_gdc
-  fMRIReferenceImageMask="$fMRIReferencePath"/"$ScoutName"_gdc_mask
-  ReferenceResultsFolder="$Path"/"$Subject"/"$AtlasSpaceFolder"/"$ResultsFolder"/"$fMRIReference"
-
-  if [ "$fMRIReferencePath" = "$fMRIFolder" ] ; then
-    log_Err_Abort "Specified BOLD reference (--fmriref=${fMRIReference}) is the same as the current BOLD (--fmriname=${NameOffMRI})!"
-  fi
-
-  if [ `${FSLDIR}/bin/imtest ${fMRIReferenceImage}` -eq 0 ] ; then
-    log_Err_Abort "Intended BOLD Reference does not exist (${fMRIReferenceImage})!"
-  fi 
-
-  if [ `${FSLDIR}/bin/imtest ${fMRIReferenceImageMask}` -eq 0 ] ; then
-    log_Err_Abort "Intended BOLD Reference mask does not exist (${fMRIReferenceImageMask})!"
-  fi 
-
-  if [ ! -d "$ReferenceResultsFolder" ] ; then
-    log_Err_Abort "Reference results folder does not exist and can not be used (${ReferenceResultsFolder})!"
-  fi 
-
-  # print warning
-
-  log_Warn "You are using an external reference (--fmriref=${fMRIReference}) for motion registration and"
-  log_Warn "  distortion correction and registration to T1w image. Pleaase consider using this option only"
-  log_Warn "  in cases when only one BOLD Reference image is available or when processing low resolution"
-  log_Warn "  legacy BOLD images. Please make sure that the reference BOLD (--fmriref=${fMRIReference})"
-  log_Warn "  and the current bold (--fmriname=${NameOffMRI}) were acquired using the same acquisition"
-  log_Warn "  parameters, e.g. phase encoding direction."
-fi
-
-# -- Use of nonlinear registration to external BOLD reference
-
-if [ "${fMRIReferenceReg}" = "nonlinear" ] ; then
-  ComplianceMsg+=" --fmrirefreg=${fMRIReferenceReg}"
   Compliance="LegacyStyleData"
 fi
 
@@ -570,64 +508,44 @@ ${RUN} "$PipelineScripts"/MotionCorrection.sh \
 DCFolderName=DistortionCorrectionAndEPIToT1wReg_FLIRTBBRAndFreeSurferBBRbased
 DCFolder=${fMRIFolder}/${DCFolderName}
 
-if [ $fMRIReference = "NONE" ] ; then
-  log_Msg "EPI Distortion Correction and EPI to T1w Registration"
+log_Msg "EPI Distortion Correction and EPI to T1w Registration"
 
-  if [ -e ${DCFolder} ] ; then
-      ${RUN} rm -r ${DCFolder}
-  fi
-  log_Msg "mkdir -p ${DCFolder}"
-  mkdir -p ${DCFolder}
-
-  ${RUN} ${PipelineScripts}/DistortionCorrectionAndEPIToT1wReg_FLIRTBBRAndFreeSurferBBRbased.sh \
-         --workingdir=${DCFolder} \
-         --scoutin=${fMRIFolder}/${ScoutName}_gdc \
-         --t1=${T1wFolder}/${T1wImage} \
-         --t1restore=${T1wFolder}/${T1wRestoreImage} \
-         --t1brain=${T1wFolder}/${T1wRestoreImageBrain} \
-         --fmapmag=${MagnitudeInputName} \
-         --fmapphase=${PhaseInputName} \
-         --fmapgeneralelectric=${GEB0InputName} \
-         --echodiff=${deltaTE} \
-         --SEPhaseNeg=${SpinEchoPhaseEncodeNegative} \
-         --SEPhasePos=${SpinEchoPhaseEncodePositive} \
-         --echospacing=${EchoSpacing} \
-         --unwarpdir=${UnwarpDir} \
-         --owarp=${T1wFolder}/xfms/${fMRI2strOutputTransform} \
-         --biasfield=${T1wFolder}/${BiasField} \
-         --oregim=${fMRIFolder}/${RegOutput} \
-         --freesurferfolder=${T1wFolder} \
-         --freesurfersubjectid=${Subject} \
-         --gdcoeffs=${GradientDistortionCoeffs} \
-         --qaimage=${fMRIFolder}/${QAImage} \
-         --method=${DistortionCorrection} \
-         --topupconfig=${TopupConfig} \
-         --ojacobian=${fMRIFolder}/${JacobianOut} \
-         --dof=${dof} \
-         --fmriname=${NameOffMRI} \
-         --subjectfolder=${SubjectFolder} \
-         --biascorrection=${BiasCorrection} \
-         --usejacobian=${UseJacobian} \
-         --preregistertool=${PreregisterTool}
-
-else
-    log_Msg "linking EPI distortion correction and T1 registration from ${fMRIReference}"
-    if [ -d ${DCFolder} ] ; then
-        log_Warn "     ... removing preexisiting files"
-        rm -r ${DCFolder}
-    fi
-    if [ -h ${DCFolder} ] ; then
-        log_Warn "     ... removing stale link"
-        rm ${DCFolder}
-    fi
-    ln -s ${fMRIReferencePath}/${DCFolderName} ${DCFolder}
- 
-    if [ `${FSLDIR}/bin/imtest ${T1wFolder}/xfms/${fMRIReference}2str` -eq 0 ]; then
-      log_Err_Abort "The expected ${T1wFolder}/xfms/${fMRIReference}2str from the reference (${fMRIReference}) does not exist!"    
-    else
-      ${FSLDIR}/bin/imcp ${T1wFolder}/xfms/${fMRIReference}2str ${T1wFolder}/xfms/${fMRI2strOutputTransform}
-    fi
+if [ -e ${DCFolder} ] ; then
+  ${RUN} rm -r ${DCFolder}
 fi
+log_Msg "mkdir -p ${DCFolder}"
+mkdir -p ${DCFolder}
+
+${RUN} ${PipelineScripts}/DistortionCorrectionAndEPIToT1wReg_FLIRTBBRAndFreeSurferBBRbased.sh \
+     --workingdir=${DCFolder} \
+     --scoutin=${fMRIFolder}/${ScoutName}_gdc \
+     --t1=${T1wFolder}/${T1wImage} \
+     --t1restore=${T1wFolder}/${T1wRestoreImage} \
+     --t1brain=${T1wFolder}/${T1wRestoreImageBrain} \
+     --fmapmag=${MagnitudeInputName} \
+     --fmapphase=${PhaseInputName} \
+     --fmapgeneralelectric=${GEB0InputName} \
+     --echodiff=${deltaTE} \
+     --SEPhaseNeg=${SpinEchoPhaseEncodeNegative} \
+     --SEPhasePos=${SpinEchoPhaseEncodePositive} \
+     --echospacing=${EchoSpacing} \
+     --unwarpdir=${UnwarpDir} \
+     --owarp=${T1wFolder}/xfms/${fMRI2strOutputTransform} \
+     --biasfield=${T1wFolder}/${BiasField} \
+     --oregim=${fMRIFolder}/${RegOutput} \
+     --freesurferfolder=${T1wFolder} \
+     --freesurfersubjectid=${Subject} \
+     --gdcoeffs=${GradientDistortionCoeffs} \
+     --qaimage=${fMRIFolder}/${QAImage} \
+     --method=${DistortionCorrection} \
+     --topupconfig=${TopupConfig} \
+     --ojacobian=${fMRIFolder}/${JacobianOut} \
+     --dof=${dof} \
+     --fmriname=${NameOffMRI} \
+     --subjectfolder=${SubjectFolder} \
+     --biascorrection=${BiasCorrection} \
+     --usejacobian=${UseJacobian} \
+     --preregistertool=${PreregisterTool}
 
 #One Step Resampling
 log_Msg "One Step Resampling"
@@ -653,9 +571,7 @@ ${RUN} ${PipelineScripts}/OneStepResampling.sh \
        --scoutin=${fMRIFolder}/${OrigScoutName} \
        --scoutgdcin=${fMRIFolder}/${ScoutName}_gdc \
        --oscout=${fMRIFolder}/${NameOffMRI}_SBRef_nonlin \
-       --ojacobian=${fMRIFolder}/${JacobianOut}_MNI.${FinalfMRIResolution} \
-       --fmrirefpath=${fMRIReferencePath} \
-       --fmrirefreg=${fMRIReferenceReg}
+       --ojacobian=${fMRIFolder}/${JacobianOut}_MNI.${FinalfMRIResolution}       
 
 log_Msg "mkdir -p ${ResultsFolder}"
 mkdir -p ${ResultsFolder}
