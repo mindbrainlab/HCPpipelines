@@ -5,57 +5,95 @@ function [Out] = icaDim(Origdata,DEMDT,VN,Iterate,NDist)
 %Variables
 Out.VNDIM=VN; %Variance Normalization Dimensionality initially set to 1
 lnb = 0.5; %Lower noise bound for Golden Section Search
-stabThresh = Iterate; %How many iterations meeting dimThresh criterion (1 for VNDIM=1 results, 2 for converged results)
+stabThresh = Iterate; %How many iterations meeting dimThresh criterion (1 for VNDIM=1 results, 2 for 2 coincidences of legacy converged results, 3 for 3 coincidences of legacy converged results, -1 for new converged results, >3 for fixed iterations)
+
+if Iterate < 0
+     stabThresh=0.25; %Difference in running average
+     priordimavg=0;
+end
+
+if Iterate > 3
+     stabThresh=Iterate; %Difference in running average
+     priordimavg=0;
+end
 
 %%%%%%%%%%%%%%%%%%%%
 
+NvoxOrig = size(Origdata,1);
+Ntp = size(Origdata,2);
+
+% Derive mask of non-zero voxels
+% Note: Use 'range' to identify non-zero voxels (which is very memory efficient)
+% rather than 'std' (which requires additional memory equal to the size of the input)
+mask = range(Origdata,2) > 0;
+useMask = ~all(mask(:)); %if the mask doesn't exclude anything, we won't actually use it
+
+% Apply mask, if it is helpful
+if useMask
+    fprintf('icaDim: Non-empty voxels: %d (= %.2f%% of %d). Masking for memory efficiency.\n', sum(mask), 100*sum(mask)/NvoxOrig, NvoxOrig);
+    data = Origdata(mask,:);
+else
+    fprintf('icaDim: No empty voxels -- not masking\n');
+    data = Origdata;  % "copying" the input as-is doesn't use any memory
+    clear mask;
+end
+clear Origdata;
+
+Nmask = size(data,1);
+
 %Remove Constant Timeseries and Detrend Data
+% Reuse 'data' variable for memory efficiency
 if DEMDT==1
-    data = Origdata(std(Origdata,[],2)>0,:);
+    % In this case, preserve the trend for adding back later
     data_detrend = detrend(data')';
-    data_trend = data - data_detrend;
+    data_trend = data - data_detrend; 
+	data = data_detrend;
+	clear data_detrend;
 elseif DEMDT==0
-    data = Origdata(std(Origdata,[],2)>0,:);
-    data_detrend = demean(data')';
-    data_trend = single(zeros(size(data,1),size(data,2)));
+	% In this case, preserve the mean (over time) for adding back later
+    data_mean = mean(data')';
+    data = demean(data')';
 elseif DEMDT==-1
-    data = Origdata(std(Origdata,[],2)>0,:);
-    data_detrend = data;
-    data_trend = single(zeros(size(data,1),size(data,2)));
+    % No demeaning or detrending; no additional prep necessary
 end
 
 %Precompute PCA reconstruction
 %octave doesn't have "rng", but it does accept "rand('twister', 0);" for matlab compatibility
-rand('twister', 0);
-[u,EigS,v]=nets_svds(data_detrend',0); %Eigenvalues of detrended data
+
+[u,EigS,v]=nets_svds(data',0); %Eigenvalues of data
 Out.DOF=sum(diag(EigS)>(std(diag(EigS))*0.1)); %Compute degrees of freedom
+
+u(isnan(u))=0; v(isnan(v))=0;
 
 c=1;
 stabCount = 0;
-while stabCount < stabThresh %Loop until dim output is stable
-        
+while stabCount < stabThresh 
+% Loop until dim output is stable
+% Note: within the while loop, 'data_vn' gets reused, but 'data' stays
+% constant (albeit, possibly demeaned and/or detrended previously, per above)
+
     c
-    rand('twister', 0);
+    clear data_vn;
     %Variance normalization via PCA reconstruction: Isolate unstructured noise
     if VN~=0
       noise_unst = (u(:,Out.VNDIM(c):Out.DOF)*EigS(Out.VNDIM(c):Out.DOF,Out.VNDIM(c):Out.DOF)*v(:,Out.VNDIM(c):Out.DOF)')';
-      Out.noise_unst_std = max(std(noise_unst,[],2),0.001);
-      data_detrend_vn = data_detrend ./ repmat(Out.noise_unst_std,1,size(data_detrend,2));
+      Out.noise_unst_std = max(std(noise_unst,[],2),0.001); clear noise_unst;
+      data_vn = data ./ repmat(Out.noise_unst_std,1,Ntp);
     elseif VN==0
-      data_detrend_vn = data_detrend;
-      Out.noise_unst_std = single(ones(size(data_detrend,1),1));
+      data_vn = data;
+      Out.noise_unst_std = ones(Nmask,1,'single');
     end
-    if size(data_detrend_vn,1)<size(data_detrend_vn,2)
+    if size(data_vn,1)<size(data_vn,2)
         if DEMDT~=-1
-            d_pcaNorm=eig(cov(data_detrend_vn'));
+            d_pcaNorm=eig(cov(data_vn'));
         else
-            d_pcaNorm=eig(data_detrend_vn*data_detrend_vn');
+            d_pcaNorm=eig(data_vn*data_vn');
         end
     else
         if DEMDT~=-1
-            d_pcaNorm=eig(cov(data_detrend_vn));
+            d_pcaNorm=eig(cov(data_vn));
         else
-            d_pcaNorm=eig(data_detrend_vn'*data_detrend_vn);
+            d_pcaNorm=eig(data_vn'*data_vn);
         end
     end
     Out.lambda_pcaNorm=flipud(d_pcaNorm);
@@ -63,9 +101,9 @@ while stabCount < stabThresh %Loop until dim output is stable
     %Enable fitting multiple noise distributions
     DOF=Out.DOF;
     %DOF=sum(Out.lambda_pcaNorm>std(Out.lambda_pcaNorm)*0.1); %Recompute DOF because of demeaning in cov
-    MaxX=length(data_detrend_vn); 
+    MaxX=length(data_vn); 
     if DEMDT==-1
-        MaxX=1000000;
+        MaxX=2000000;
     end
     lambda=Out.lambda_pcaNorm;
     S=0;
@@ -73,34 +111,45 @@ while stabCount < stabThresh %Loop until dim output is stable
     for i=1:NDist
         [x(i),en] = FitWishart(lnb,S,DOF,MaxX,lambda(1:DOF));
         lambda=lambda(1:DOF)-en(1:DOF); 
-        en=[en;single(zeros(Out.DOF-length(en)+1,1))];
+        en=[en; zeros(Out.DOF-length(en)+1,1,'single')];
         EN(:,i)=en(1:Out.DOF);
         MaxX=x(i);
         DOF=min(find(lambda <= 0)); 
-        lambda=[lambda(1:DOF);single(zeros(Out.DOF-DOF+1,1))];
+        lambda=[lambda(1:DOF-1); zeros(Out.DOF-DOF+1,1,'single')];
         lambda=lambda(1:Out.DOF);
     end
       
     Out.EN=sum(EN,2); 
     %Out.x(c)=x(1);
-    Out.x(c)=round(x(end));
+    %Out.x(c)=round(x(end));
     %DOF=round(Out.DOF);
-    
+    if NDist>1
+       %Out.x(c)=round(x(1)-sum(x(2:end))); %Fit is not as steep as data, so subtract additional spatial DOFs
+       %Best fit Wishart to entire multi-piece Wishart 
+       [x,en] = FitWishart(0.01,S,Out.DOF,x(1),Out.EN);
+       Out.x(c) = x;
+    else
+       Out.x(c)=round(x(1)); 
+    end
     %MaxS=5;
     %DOF=Out.DOF;
     %MaxX=round(Out.x(c));
-    %MaxX=length(data_detrend_vn);
+    %MaxX=length(data_vn);
     %lambda=Out.lambda_pcaNorm;
     %[Out.x(c),Out.EN,Out.s(c)] = SmoothEst(lnb,MaxS,DOF,MaxX,lambda);
 
     %[Out.x(c),Out.EN] = FitWishart(lnb,Out.s(c),DOF,MaxX,lambda(1:DOF));
     
     %Divide eigenvalues by null for adjusted output values
-    Out.lambdaAdj = abs(Out.lambda_pcaNorm(1:DOF)./(Out.EN(1:DOF)));
+    Out.lambdaAdj = Out.lambda_pcaNorm(1:DOF)./(Out.EN(1:DOF));
     %Out.lambdaAdj(DOF:end)=1;
-    
+    n=DOF-1;
+    tmp=ones(Out.DOF,1);
+    tmp(1:n)=Out.lambdaAdj(1:n);
+    Out.lambdaAdj=tmp;
     %Normalize adjusted eigenvalues to 1 for input to laplacian
     %Out.lambdaAdj_norm = Out.lambdaAdj ./ max(Out.lambdaAdj);
+
     Out.pcaDim_lambdaAdj = pca_dim(Out.lambdaAdj',Out.x(c));
     
     %Maximum of laplacian is estimate of optimal dimensionality
@@ -128,16 +177,43 @@ while stabCount < stabThresh %Loop until dim output is stable
 
     %Store dims in array, check number of occurances to prevent dim loops
     stabCount = sum(Out.VNDIM==Out.calcDim);
-    
+    if Iterate < 0 
+        if c>3
+            diffdimavg = abs(priordimavg-mean(Out.VNDIM(4:end)));
+            if diffdimavg < stabThresh
+                stabCount = 1;
+            else
+                stabCount = 0;
+            end
+            priordimavg = mean(Out.VNDIM(4:end));
+            disp(['   dimavg: ' mat2str(priordimavg)]);
+        else
+            stabCount = 0;
+        end
+    end
+
+    if Iterate > 3
+        stabCount=c;
+        priordimavg = mean(Out.VNDIM(4:end));
+        disp(['   dimavg: ' mat2str(priordimavg)]);
+    end
 end %End while loop for dim calcs
-rand('twister', 0);
-if DEMDT~=-1
-    [u,EigS,v]=nets_svds(demean(data_detrend_vn)',0);
-else
-    [u,EigS,v]=nets_svds(data_detrend_vn',0);
-end    
+
+% Outside the while loop, no longer need 'data'
+clear data;
+
+if Iterate < 0 
+    Out.calcDim=round(priordimavg);
+end
+if Iterate > 3 
+    Out.calcDim=round(mean(Out.VNDIM(4:end)));
+end
+
+[u,EigS,v]=nets_svds(data_vn',0);
+clear data_vn;
+
 u(isnan(u))=0; v(isnan(v))=0;
-Out.EigSAdj=single(zeros(length(EigS),1));
+Out.EigSAdj=zeros(length(EigS),1,'single');
 Out.grot_one=diag(EigS(1:length(Out.EN),1:length(Out.EN)));
 Out.grot_two=Out.grot_one.^2;
 Out.grot_three=(Out.grot_two./max(Out.grot_two)).*max(Out.lambda_pcaNorm);
@@ -154,7 +230,8 @@ end
 %manual display of Out fields, to make octave less verbose
 disp('Out =');
 disp(['   VNDIM: ' mat2str(Out.VNDIM)]);
-disp(['   DOF: ' mat2str(Out.DOF)]);
+disp(['   Out.DOF: ' mat2str(Out.DOF)]);
+disp(['   DOF: ' mat2str(DOF)]);
 disp(['   noise_unst_std: array of size ' mat2str(size(Out.noise_unst_std))]);
 disp(['   lambda_pcaNorm: array of size ' mat2str(size(Out.lambda_pcaNorm))]);
 disp(['   EN: array of size ' mat2str(size(Out.EN))]);
@@ -173,22 +250,50 @@ disp(['   NewDOF: ' mat2str(Out.NewDOF)]);
 
 Out.EigSAdj(1:length(Out.EN))=sqrt(Out.grot_six);
 
-Out.data=single(zeros(size(Origdata,1),size(Origdata,2)));
-if DEMDT~=-1
-    Out.data(std(Origdata,[],2)>0,:)=data_trend + (((u*diag(Out.EigSAdj)*v')'+repmat(mean(data_detrend_vn),size(data_detrend_vn,1),1)) .* repmat(Out.noise_unst_std,1,size(data_detrend_vn,2)));
-else
-    Out.data(std(Origdata,[],2)>0,:)=data_trend + (((u*diag(Out.EigSAdj)*v')') .* repmat(Out.noise_unst_std,1,size(data_detrend_vn,2)));
+% Form the masked voxel version of the output data
+tmp = (u*diag(Out.EigSAdj)*v')'; clear v;
+tmp = tmp .* repmat(Out.noise_unst_std,1,Ntp);
+if DEMDT==1
+    % Add the trend back in
+	tmp = tmp + data_trend;
+	clear data_trend;
+elseif DEMDT==0
+    % Add the mean back in
+	tmp = tmp + repmat(data_mean,1,Ntp);
+elseif DEMDT==-1
+    % No demeaning or detrending performed; nothing to add back in
 end
-temp=single(zeros(size(Origdata,1),1)); temp(std(Origdata,[],2)>0,:)=Out.noise_unst_std; Out.noise_unst_std=max(temp,0.001); clear temp;
 
-end %End function
+% Create the fully-formed (non-masked) version of the output data
+if useMask
+    Out.data = zeros(NvoxOrig,Ntp,'single');
+    Out.data(mask,:) = tmp;
+else
+    Out.data = tmp;
+end
+clear tmp;
+
+% Create fully-formed (non-masked) version of Out.noise_unst_std, 
+% and make sure its value is at least 0.001
+if useMask
+    temp = zeros(NvoxOrig,1,'single');
+    temp(mask,:) = Out.noise_unst_std;
+else
+    temp = Out.noise_unst_std;
+end
+Out.noise_unst_std=max(temp,0.001);
+clear temp;
+
+end %End main function
+
+
+%% ----------- Internal Helper Functions ------------ %%
 
 function [out] = lpdist(in)
     out=pdist(log(in));
 end
 
 function [x,EN] = FitWishart(lnb,S,DOF,MaxX,lambda) %FitWishart(lnb,step,DOF,MaxX,lambda)
-    rand('twister', 0);
     EigDn1=round(DOF*lnb); %Isolate search to noise
     EigDn2=round(DOF-1); %Reqd for post MR+FIX deconcatinated tcs
     %EigDn2=round(DOF*0.75); %Reqd for post MR+FIX deconcatinated tcs
@@ -219,7 +324,6 @@ function [x,EN] = FitWishart(lnb,S,DOF,MaxX,lambda) %FitWishart(lnb,step,DOF,Max
     
     while (abs(b-a)>epsilon) && (k<iter) %Loop until low error OR max iter met
         %k=k+1;
-        rand('twister', 0);
         disp([num2str(a) ' ' num2str(x1) ' ' num2str(x2) ' ' num2str(b)]);
         %Check both terms for minimal pairwise distance and continue toward minimum
         if (f_x1<f_x2)
@@ -256,8 +360,6 @@ function [x,EN] = FitWishart(lnb,S,DOF,MaxX,lambda) %FitWishart(lnb,step,DOF,Max
     else
         x = x2;
     end
-    rand('twister', 0);
-    %disp(randn(1,1));
     EN=flipud(eig(cov(Smooth(randn(round(x),DOF),S))));
     
     x=x/1+S;
@@ -345,27 +447,27 @@ function [x,EN,s] = SmoothEst(lnb,MaxS,DOF,MaxX,lambda)
 end
 
 function [O] = Smooth(M,S)
-if S==0
+  if S==0
     O=M;
-else
-sigma = S/(2*sqrt(2*log(2)));
-%sz = S*6;    % length of gaussFilter vector
-%x = linspace(-sz / 2, sz / 2, sz);
-%gaussFilter = exp(-x .^ 2 / (2 * sigma ^ 2));
-%gaussFilter = gaussFilter / sum (gaussFilter); % normalize
+  else
+	sigma = S/(2*sqrt(2*log(2)));
+	%sz = S*6;    % length of gaussFilter vector
+	%x = linspace(-sz / 2, sz / 2, sz);
+	%gaussFilter = exp(-x .^ 2 / (2 * sigma ^ 2));
+	%gaussFilter = gaussFilter / sum (gaussFilter); % normalize
 
 
-width = round((6*sigma - 1)/2);
-support = (-width:width);
-gaussFilter = exp( -(support).^2 ./ (2*sigma^2) );
-gaussFilter = gaussFilter/ sum(gaussFilter);
+	width = round((6*sigma - 1)/2);
+	support = (-width:width);
+	gaussFilter = exp( -(support).^2 ./ (2*sigma^2) );
+	gaussFilter = gaussFilter/ sum(gaussFilter);
 
-O=single(zeros(size(M,1),size(M,2)));
+	O=zeros(size(M,1),size(M,2),'single');
 
-for i=1:size(M,2)
-    op
-    O(:,i) = conv (M(:,i), gaussFilter, 'same');
-    %O(:,i) = filter (gaussFilter,1,M(:,i));
-end
-end
+	for i=1:size(M,2)
+	  op
+	  O(:,i) = conv (M(:,i), gaussFilter, 'same');
+	  %O(:,i) = filter (gaussFilter,1,M(:,i));
+	end
+  end
 end

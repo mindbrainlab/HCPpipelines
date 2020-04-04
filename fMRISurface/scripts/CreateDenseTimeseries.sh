@@ -1,8 +1,56 @@
 #!/bin/bash 
 
-source "${HCPPIPEDIR}/global/scripts/debug.shlib" "$@" # Debugging functions; also sources log.shlib
+# --------------------------------------------------------------------------------
+#  Usage Description Function
+# --------------------------------------------------------------------------------
 
-echo -e "\n START: CreateDenseTimeSeries"
+script_name=$(basename "${0}")
+
+show_usage() {
+	cat <<EOF
+
+${script_name}: Sub-script of GenericfMRISurfaceProcessingPipeline.sh
+
+EOF
+}
+
+# Allow script to return a Usage statement, before any other output or checking
+if [ "$#" = "0" ]; then
+    show_usage
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+#  Check that HCPPIPEDIR is defined and Load Function Libraries
+# ------------------------------------------------------------------------------
+
+if [ -z "${HCPPIPEDIR}" ]; then
+  echo "${script_name}: ABORTING: HCPPIPEDIR environment variable must be set"
+  exit 1
+fi
+
+source "${HCPPIPEDIR}/global/scripts/debug.shlib" "$@"         # Debugging functions; also sources log.shlib
+source ${HCPPIPEDIR}/global/scripts/opts.shlib                 # Command line option functions
+
+opts_ShowVersionIfRequested $@
+
+if opts_CheckForHelpRequest $@; then
+	show_usage
+	exit 0
+fi
+
+# ------------------------------------------------------------------------------
+#  Verify required environment variables are set and log value
+# ------------------------------------------------------------------------------
+
+log_Check_Env_Var HCPPIPEDIR
+log_Check_Env_Var CARET7DIR
+
+# ------------------------------------------------------------------------------
+#  Start work
+# ------------------------------------------------------------------------------
+
+log_Msg "START"
 
 DownSampleFolder="$1"
 Subject="$2"
@@ -35,7 +83,7 @@ echo "PctCoverage, Nnonzero, Ngrayordinates" >| "$OutputAtlasDenseTimeseries"_no
 echo "${PctCoverage}, ${Nnonzero}, ${Ngrayordinates}" >> "$OutputAtlasDenseTimeseries"_nonzero.stats.txt
 # If we don't have full grayordinate coverage, save out a mask to identify those locations
 if [ "$Nnonzero" -ne "$Ngrayordinates" ]; then
-	${CARET7DIR}/wb_command -cifti-math 'x > 0' "$OutputAtlasDenseTimeseries"_nonzero.dscalar.nii -var "$OutputAtlasDenseTimeseries".stdev.dscalar.nii
+	${CARET7DIR}/wb_command -cifti-math 'x > 0' "$OutputAtlasDenseTimeseries"_nonzero.dscalar.nii -var x "$OutputAtlasDenseTimeseries".stdev.dscalar.nii
 fi
 rm -f "$OutputAtlasDenseTimeseries".stdev.dscalar.nii
 	
@@ -44,4 +92,4 @@ rm "$NameOffMRI"_AtlasSubcortical_s"$SmoothingFWHM".nii.gz
 rm "$NameOffMRI"_s"$SmoothingFWHM".atlasroi.L."$LowResMesh"k_fs_LR.func.gii
 rm "$NameOffMRI"_s"$SmoothingFWHM".atlasroi.R."$LowResMesh"k_fs_LR.func.gii
 
-echo " END: CreateDenseTimeSeries"
+log_Msg "END"

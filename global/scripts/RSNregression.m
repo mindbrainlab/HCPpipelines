@@ -1,5 +1,5 @@
-function RSNregression(InputFile, InputVNFile, GroupMaps, Method, ParamsFile, VAWeightsName, OutputBeta, varargin)
-    optional = myargparse(varargin, {'VolInputFile' 'VolInputVNFile' 'VolCiftiTemplate' 'OldBias' 'OldVolBias' 'GoodBCFile' 'VolGoodBCFile' 'SpectraParams' 'OutputZ' 'OutputVolBeta' 'OutputVolZ' 'SurfString' 'ScaleFactor' 'WRSmoothingSigma'});
+function RSNregression(InputFile, InputVNFile, Method, ParamsFile, OutputBeta, varargin)
+    optional = myargparse(varargin, {'GroupMaps' 'VAWeightsName' 'VolInputFile' 'VolInputVNFile' 'VolCiftiTemplate' 'OldBias' 'OldVolBias' 'GoodBCFile' 'VolGoodBCFile' 'SpectraParams' 'OutputZ' 'OutputVolBeta' 'OutputVolZ' 'SurfString' 'ScaleFactor' 'WRSmoothingSigma'});
     
     %InputFile - text file containing filenames of timeseries to concatenate
     %InputVNFile - text file containing filenames of the variance maps of each input
@@ -52,7 +52,7 @@ function RSNregression(InputFile, InputVNFile, GroupMaps, Method, ParamsFile, VA
     if ~strcmp(optional.VolCiftiTemplate, '')
         doVol = true;
         outVolTemplate = ciftiopen(optional.VolCiftiTemplate, wbcommand);
-        clear outVolTemplate.cdata;
+        outVolTemplate.cdata = [];
         if ~strcmp(optional.VolInputFile, '')
             volinputArray = myreadtext(optional.VolInputFile);
             volinputVNArray = myreadtext(optional.VolInputVNFile);
@@ -91,7 +91,7 @@ function RSNregression(InputFile, InputVNFile, GroupMaps, Method, ParamsFile, VA
         tempvncii.cdata = max(tempvncii.cdata / mean(tempvncii.cdata), 0.001);
         %VN file is really just variance of BC data - to restore to close to original variance, turn the variance back into non-bc space and take the mean
         tempnorm = ScaleFactor * demean(tempcii.cdata, 2) ./ repmat(tempvncii.cdata, 1, size(tempcii.cdata, 2));
-        clear tempcii.cdata;
+        tempcii.cdata = [];
         % for output, make the vn data reference new BC space
         if doFixBC
             tempBCcifti = ciftiopen(goodBCArray{i}, wbcommand);
@@ -135,9 +135,11 @@ function RSNregression(InputFile, InputVNFile, GroupMaps, Method, ParamsFile, VA
         clear vnvolsum;
     end
     
-    GroupMapcii = ciftiopen(GroupMaps, wbcommand);
-    weightscii = ciftiopen(VAWeightsName, wbcommand); %normalized vertex areas, voxels are all 1s
-    AreaWeights = weightscii.cdata;
+    if strcmp(Method,'weighted') || strcmp(Method,'dual')
+        GroupMapcii = ciftiopen(optional.GroupMaps, wbcommand);
+        weightscii = ciftiopen(optional.VAWeightsName, wbcommand); %normalized vertex areas, voxels are all 1s
+        AreaWeights = weightscii.cdata;
+    end
     switch Method
         case 'weighted'
             if strcmp(optional.WRSmoothingSigma, '')
@@ -145,8 +147,8 @@ function RSNregression(InputFile, InputVNFile, GroupMaps, Method, ParamsFile, VA
             end
             WRSmoothingSigma = str2double(optional.WRSmoothingSigma);
             paramsArray = myreadtext(ParamsFile);
-            if length(paramsArray) <= 1
-                error('"weighted" method needs more parameters, use method "dual" to do only vertex area weighted regression');
+            if length(paramsArray) == 0
+                error('"weighted" method needs at least one low dimensionality file to estimate weighting, use method "dual" to do only vertex area weighted regression');
             end
             surfArray = textscan(optional.SurfString, '%s', 'Delimiter', {'@'}); %left right
             surfArray = surfArray{1};
@@ -174,15 +176,21 @@ function RSNregression(InputFile, InputVNFile, GroupMaps, Method, ParamsFile, VA
             [betaICA, NODEts] = weightedDualRegression(normalise(betaICAone), inputConcat, AreaWeights);
         case 'dual'
             [betaICA, NODEts] = weightedDualRegression(GroupMapcii.cdata, inputConcat, AreaWeights);
+        case 'single'
+            SpectraArray = textscan(optional.SpectraParams, '%s', 'Delimiter', {'@'});
+            InputSpectraTS = SpectraArray{1}{1};
+            NODEts=ciftiopen(InputSpectraTS, wbcommand);
+            NODEts=NODEts.cdata';
+            betaICA = ((pinv(normalise(NODEts)) * demean(inputConcat')))';
         otherwise
-            error(['unrecognized method: "' Method '", use "weighted" or "dual"']);
+            error(['unrecognized method: "' Method '", use "weighted", "dual", or "single"']);
     end
     
     NODEtsnorm = normalise(NODEts);
     
     %outputs
     %Save Timeseries and Spectra if Desired
-    if ~strcmp(optional.SpectraParams, '')
+    if ~strcmp(optional.SpectraParams, '') && ~strcmp(Method,'single')
         SpectraArray = textscan(optional.SpectraParams, '%s', 'Delimiter', {'@'});
         nTPsForSpectra = min(str2double(SpectraArray{1}{1}), size(NODEts, 1));
         OutputSpectraTS = SpectraArray{1}{2};
